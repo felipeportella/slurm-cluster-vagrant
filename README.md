@@ -47,11 +47,10 @@ make clean
 
 Tested with:
 
-- Vagrant 2.0.1
+- Vagrant 2.2.19
 
-- SLURM 15.08.7 (Ubuntu 16.04)
+- SLURM 20.11.4 (Ubuntu 21.04)
 
 ---
-Fork from http://mussolblog.wordpress.com/
 
-http://mussolblog.wordpress.com/2013/07/17/setting-up-a-testing-slurm-cluster/
+Original fork from: http://mussolblog.wordpress.com/2013/07/17/setting-up-a-testing-slurm-cluster/
