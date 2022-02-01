@@ -2,3 +2,5 @@
 munge.key
 slurm/*
 .DS_Store
+id_*
+munge.key

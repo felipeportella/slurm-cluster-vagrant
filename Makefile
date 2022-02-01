@@ -1,46 +1,43 @@
 SHELL:=/bin/bash
 
-# Create Vagrant VMs
-# copy munge authenication key from controller to node
-# !! need cp -p or else munge keys do not work
+NODESLIST:=node1 node2
+ALLSERVERSLIST:=controller ${NODESLIST}
+
+# Create Vagrant VMs with SLURM configured on them
 setup:
-	vagrant up && \
-	vagrant ssh controller -- -t 'sudo cp -p /etc/munge/munge.key /vagrant/' && \
-	vagrant ssh server -- -t 'sudo cp -p /vagrant/munge.key /etc/munge/' && \
-	vagrant ssh server -- -t 'sudo chown munge /etc/munge/munge.key' && \
-	vagrant ssh controller -- -t 'ssh-keygen -b 2048 -t rsa -q -N "" -f /home/vagrant/.ssh/id_rsa' && \
-	vagrant ssh controller -- -t 'cp /home/vagrant/.ssh/id_rsa.pub /vagrant/id_rsa.controller.pub' && \
-	vagrant ssh server -- -t 'cat /vagrant/id_rsa.controller.pub >> .ssh/authorized_keys' && \
-	vagrant ssh server -- -t 'ssh-keygen -b 2048 -t rsa -q -N "" -f /home/vagrant/.ssh/id_rsa' && \
-	vagrant ssh server -- -t 'cp /home/vagrant/.ssh/id_rsa.pub /vagrant/id_rsa.server.pub' && \
-	vagrant ssh controller -- -t 'cat /vagrant/id_rsa.server.pub >> .ssh/authorized_keys' && \
-	rm -f munge.key id_rsa.controller.pub id_rsa.server.pub
+	vagrant up
+	rm -f munge.key id_*
 
 # make sure 'slurm' dir is writable for VMs
-# start munge in both VMs
+# start munge in VMs
 # start slurmctld, wait many seconds for it to fully start
 # start slurmd
 start:
-	find slurm -type d -exec chmod a+rwx {} \; && \
-	vagrant ssh controller -- -t 'sudo /etc/init.d/munge start; sleep 5' && \
-	vagrant ssh server -- -t 'sudo /etc/init.d/munge start; sleep 5' && \
+	find slurm -type d -exec chmod a+rwx {} \;
+	#vagrant ssh controller -- -t 'sudo /etc/init.d/munge start; sleep 5' && \
+	#vagrant ssh node1 -- -t 'sudo /etc/init.d/munge start; sleep 5' && \
+	#vagrant ssh node2 -- -t 'sudo /etc/init.d/munge start; sleep 5' && \
 	vagrant ssh controller -- -t 'sudo slurmctld; sleep 30' && \
-	vagrant ssh server -- -t 'sudo slurmd; sleep 30' && \
-	vagrant ssh controller -- -t 'sudo scontrol update nodename=server state=resume; sinfo; sleep 5'
+	vagrant ssh node1 -- -t 'sudo slurmd; sleep 30' && \
+	vagrant ssh node2 -- -t 'sudo slurmd; sleep 30' && \
+	vagrant ssh controller -- -t 'sudo scontrol update nodename=node[1-2] state=resume; sinfo; sleep 5'
 
 sinfo:
 	vagrant ssh controller -- -t 'sinfo'
 
 # might need this to fix node down state?
 # fix:
-# 	vagrant ssh controller -- -t 'sudo scontrol update nodename=server state=resume'
+# 	vagrant ssh controller -- -t 'sudo scontrol update nodename=node1 state=resume'
+# 	vagrant ssh controller -- -t 'sudo scontrol update nodename=node2 state=resume'
 
 # https://slurm.schedmd.com/troubleshoot.html
+# https://github.com/dun/munge/blob/master/QUICKSTART
 # munge log: /var/log/munge/munged.log
+.ONESHELL:
 test:
 	@printf ">>> Checking munge keys on both machines\n"
-	@vagrant ssh controller -- -t 'sudo md5sum /etc/munge/munge.key; ls -l /etc/munge/munge.key'
-	@vagrant ssh server -- -t 'sudo md5sum /etc/munge/munge.key; ls -l /etc/munge/munge.key'
+	@vagrant ssh controller -- -t 'sudo md5sum /etc/munge/munge.key; sudo ls -l /etc/munge/munge.key'
+	@vagrant ssh node1 -- -t 'sudo md5sum /etc/munge/munge.key; sudo ls -l /etc/munge/munge.key'
 	@printf "\n\n>>> Checking if controller can contact node (network)\n"
 	@vagrant ssh controller -- -t 'ping 10.10.10.4 -c1'
 	@printf "\n\n>>> Checking if SLURM controller is running\n"
@@ -50,27 +47,34 @@ test:
 	@printf "\n\n>>> Checking cluster status\n"
 	@vagrant ssh controller -- -t 'sinfo'
 	@printf "\n\n>>> Checking if node can contact controller (network)\n"
-	@vagrant ssh server -- -t 'ping 10.10.10.3 -c1'
+	@vagrant ssh node1 -- -t 'ping 10.10.10.3 -c1'
 	@printf "\n\n>>> Checking if node can contact SLURM controller\n"
-	@vagrant ssh server -- -t 'scontrol ping'
+	@vagrant ssh node1 -- -t 'scontrol ping'
 	@printf "\n\n>>> Checking if slurmd is running on node\n"
-	@vagrant ssh server -- -t 'ps -el | grep slurmd'
+	@vagrant ssh node1 -- -t 'ps -el | grep slurmd'
 	@printf "\n\n>>> Running a test job\n"
 	@vagrant ssh controller -- -t 'sbatch --wrap="hostname"'
 	@printf "\n\n>>> Running another test job\n"
 	@vagrant ssh controller -- -t 'sbatch /vagrant/job.sh'
 	@printf "\n\n>>> Checking node status\n"
-	@vagrant ssh controller -- -t 'scontrol show nodes=server'
+	@vagrant ssh controller -- -t 'scontrol show nodes'
+	@printf "\n\n>>> Munge troubeshooting (encode and decode a credential)\n"
+	@vagrant ssh controller -- -t 'munge -n | unmunge'
+	@vagrant ssh node1 -- -t 'munge -n | unmunge'
+	@vagrant ssh node1 -- -t 'munge -n | ssh controller unmunge'
 
 # pull the plug on the VMs
 stop:
-	vagrant halt --force controller
-	vagrant halt --force server
+	for server in ${ALLSERVERSLIST}; do \
+		vagrant halt --force $$server; \
+	done
 
 # delete the VMs
 remove:
-	vagrant destroy controller
-	vagrant destroy server
+	for server in ${ALLSERVERSLIST}; do \
+		vagrant destroy $$server ; \
+	done
+
 
 # location of the SLURM default config generators for making new conf files
 get-config-html:
